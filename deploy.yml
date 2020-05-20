@@ -1,0 +1,65 @@
+---
+- hosts: localhost
+  gather_facts: false
+  connection: localhost
+  tasks:
+  - name: Create database for datetime storage
+    dynamodb_table:
+	    hash_key_name: datetime
+		hash_key_type: STRING
+		name: mydb
+		read_capacity: 1
+		write_capacity: 1
+ 
+  - name : Create IAM role for Lambda to use to access DynamoDB table
+    iam_role:
+		name: insertdatetime-lambda-role
+		state: present
+		assume_role_policy_document
+			Version: '2020-05-17'
+			Statement:
+			- Effect: Allow
+			  Principle:
+                Service: [lambda.amazonaws.com]
+              Action:
+              - sts:AssumeRole
+        managed_policy:
+        - CloudWatchLogsFullAccess
+        - AmazonDynamoDBFullAccess
+       register: execution
+       
+   - name: Zip code for deployment
+      archive:
+        dest: code.zip
+        format: zip
+        path:
+        - ./handler.py
+        
+   - name: Upload code to Lambda service
+     lambda:
+        name: insertdatetime 
+        description: Service provider for datetime app
+        role: "{{execution.iam_role_arn }}'
+        # code related options
+        zip_file: code.zip
+        handler: handler.handler
+        runtime: python3.6
+       register: function
+       
+    - name: Create permission to allow API Gateway to invoke Lambda
+      lambda_policy:
+        action: 'lambda:InvokeFunction'
+        function_name: insertdatetime
+        principle: apigateway.amazonaws.com
+        statement_id: allow-api-gateway
+        
+    - name: Create REST API endpoints for Lambda function
+      aws_api_gateway:
+         api_id: 8a8ipf9lk4
+        deploy_desc: new API version
+        stage: test
+        swagger_file: api-gateway-swagger.json
+      register: api_info
+    -debug: var=api_info
+    
+       
